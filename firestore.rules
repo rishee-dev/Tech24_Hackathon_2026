@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Issues collection
+    match /issues/{issueId} {
+      // Allow read for everyone, but prevent non-admins from reading AI analysis field
+      allow read: if (
+        // If aiAnalysis field is not present, allow read
+        (!resource.data.keys().hasAny(['aiAnalysis']))
+        // Admins may read everything
+        || (request.auth != null && (request.auth.token.role == 'ADMIN' || request.auth.token.admin == true))
+      );
+
+      allow create: if request.auth != null
+        && !(request.resource.data.keys().hasAny(['status', 'acceptedBy', 'acceptedAt', 'aiAnalysis']));
+
+      allow update: if request.auth != null && (
+        // Admins can update lifecycle fields
+        request.auth.token.role == 'ADMIN' || request.auth.token.admin == true
+      ) && (
+        // Prevent clients from writing aiAnalysis directly; only server (Cloud Functions) can write aiAnalysis
+        (!request.resource.data.keys().hasAny(['aiAnalysis']) || (request.auth.token.role == 'ADMIN' || request.auth.token.admin == true))
+      );
+
+      allow delete: if false; // Prevent deletion through client
+    }
+
+    // Audit logs: only server (Cloud Functions) should write; block client writes
+    match /audit_logs/{doc} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    // Notifications: only server writes; clients can read their own notifications
+    match /notifications/{notifId} {
+      allow create: if false;
+      allow read: if request.auth != null && request.auth.uid == resource.data.to;
+      allow update, delete: if false;
+    }
+  }
+}
